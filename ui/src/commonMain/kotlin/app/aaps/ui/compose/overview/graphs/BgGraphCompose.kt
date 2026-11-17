@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -49,6 +50,7 @@ import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProdu
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianLayerRangeProvider
 import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
 import com.patrykandpatrick.vico.compose.cartesian.decoration.Decoration
+import com.patrykandpatrick.vico.compose.common.Position
 import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerController
 import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
@@ -196,6 +198,7 @@ fun BgGraphCompose(
 
     // Single model producer shared by all layers
     val modelProducer = remember { CartesianChartModelProducer() }
+    val treatmentLabelData = remember { TreatmentLabelData() }
 
     // Colors from theme (stable - won't change)
     val regularColor = AapsTheme.generalColors.originalBgValue
@@ -245,7 +248,7 @@ fun BgGraphCompose(
     val latestModelInput by rememberUpdatedState(modelInput)
     LaunchedEffect(modelProducer) {
         snapshotFlow { latestModelInput }.collect { input ->
-            submitBgModel(modelProducer, startAxisRangeProvider, activeSeriesState, input)
+            submitBgModel(modelProducer, startAxisRangeProvider, activeSeriesState, treatmentLabelData, input)
         }
     }
 
@@ -423,10 +426,10 @@ fun BgGraphCompose(
     val treatmentLines = remember(insulinColor, carbsColor, bgCheckColor, bgCheckPainter) {
         buildList {
             for (tier in MarkerTier.entries) {
-                add(createMarkerLine(insulinColor, ::invertedTriangleShape, tier.markerSize))
+                add(createInvisibleTreatmentLine())
             }
             for (tier in MarkerTier.entries) {
-                add(createMarkerLine(carbsColor, ::triangleBelowShape, tier.markerSize))
+                add(createInvisibleTreatmentLine())
             }
             add(
                 LineCartesianLayer.Line(
@@ -462,6 +465,11 @@ fun BgGraphCompose(
         InRangeBand(low = lowMark, high = highMark, color = inRangeColor.copy(alpha = 0.2f))
     }
 
+    // Draw one readable value for every manual bolus/carbs entry on the BG graph.
+    val treatmentLabelDecoration = remember(treatmentLabelData, insulinColor, carbsColor) {
+        TreatmentAmountLabels(treatmentLabelData, insulinColor, carbsColor)
+    }
+
     val inspectMarker = remember(inspect) { inspect?.let { SilentInspectMarker } }
     // Always called, so the composable calls do not depend on inspect
     val defaultMarkerController = CartesianMarkerController.rememberShowOnPress()
@@ -469,7 +477,7 @@ fun BgGraphCompose(
 
     val clockChanges = rememberClockChangeDecoration(minTimestamp, maxTimestamp, bgReadings, showIcon = true)
     val decorations = remember(inRangeBox, nowLine, clockChanges, inspectLine) {
-        listOfNotNull(inRangeBox, nowLine, clockChanges, inspectLine)
+        listOfNotNull(inRangeBox, nowLine, clockChanges, treatmentLabelDecoration, inspectLine)
     }
 
     // =========================================================================
@@ -586,6 +594,7 @@ private suspend fun submitBgModel(
     modelProducer: CartesianChartModelProducer,
     startAxisRangeProvider: MutableYRangeProvider,
     activeSeries: MutableState<List<String>>,
+    treatmentLabelData: TreatmentLabelData,
     input: BgModelInput
 ) {
     val minTimestamp = input.minTimestamp
@@ -667,6 +676,9 @@ private suspend fun submitBgModel(
         gap = 0.0,
         fallbackY = niceBgScale.min + axisSpan * MARKER_FALLBACK_FRACTION
     )
+
+    // Keep the label data alongside the chart model. No treatment timestamps or doses change.
+    treatmentLabelData.markers = markers
 
     // Note: do NOT early-return when there are no BG points. With a clean DB the chart must
     // still build its frame (axes, now-line, in-range belt) via the normalizer + dummy layers,
@@ -840,6 +852,60 @@ private fun createMarkerLine(color: Color, shapeOf: (tipInset: Float) -> Shape, 
             LineCartesianLayer.Point(component = ShapeComponent(fill = Fill(color), shape = shape), size = boxSize)
         )
     )
+}
+
+/** A stable holder avoids reconstructing the interactive Vico chart during scrolling. */
+private class TreatmentLabelData {
+    @Volatile var markers: TreatmentMarkers = TreatmentMarkers(emptyList(), emptyList(), emptyList())
+}
+
+/** The six treatment series still exist for chart synchronization, but no longer draw triangles. */
+private fun createInvisibleTreatmentLine() = LineCartesianLayer.Line(
+    fill = LineCartesianLayer.LineFill.single(Fill(Color.Transparent)),
+    areaFill = null
+)
+
+/**
+ * Readable labels on the glucose chart. Coordinates use the same time/scroll transform as the
+ * built-in now line, so labels follow the user's shared horizontal scrolling and zooming.
+ */
+private class TreatmentAmountLabels(
+    private val data: TreatmentLabelData,
+    insulinColor: Color,
+    carbsColor: Color
+) : Decoration {
+    private val insulinText = TextComponent(textStyle = TextStyle(color = insulinColor, fontSize = 14.sp))
+    private val carbsText = TextComponent(textStyle = TextStyle(color = carbsColor, fontSize = 14.sp))
+
+    override fun drawOverLayers(context: CartesianDrawingContext) {
+        with(context) {
+            if (ranges.xStep == 0.0) return
+            val yRange = ranges.getYRange(Axis.Position.Vertical.Start)
+            if (yRange.length <= 0.0) return
+            val pxGap = 6.dp.pixels
+            fun drawLabel(marker: TreatmentMarker, insulin: Boolean) {
+                val x = layerBounds.left + layerDimensions.startPadding +
+                    layerDimensions.xSpacing * ((marker.x - ranges.minX) / ranges.xStep).toFloat() - scroll
+                // Avoid clipped text at the left/right edges.
+                if (x < layerBounds.left + 20.dp.pixels || x > layerBounds.right - 20.dp.pixels) return
+                val y = layerBounds.bottom -
+                    ((marker.y - yRange.minY) / yRange.length).toFloat() * layerBounds.height
+                val text = marker.amount.toString().removeSuffix(".0")
+                val component = if (insulin) insulinText else carbsText
+                component.draw(
+                    context = context,
+                    text = text,
+                    x = x,
+                    y = if (insulin) (y - pxGap).coerceAtLeast(layerBounds.top + 16.dp.pixels)
+                        else (y + pxGap).coerceAtMost(layerBounds.bottom - 16.dp.pixels),
+                    horizontalPosition = Position.Horizontal.Center,
+                    verticalPosition = if (insulin) Position.Vertical.Bottom else Position.Vertical.Top
+                )
+            }
+            data.markers.insulin.forEach { drawLabel(it, true) }
+            data.markers.carbs.forEach { drawLabel(it, false) }
+        }
+    }
 }
 
 /**

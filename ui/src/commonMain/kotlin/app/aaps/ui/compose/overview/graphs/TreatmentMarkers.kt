@@ -30,7 +30,7 @@ internal const val MARKER_MAX_READING_GAP_MS = 15 * 60_000L
 internal const val MARKER_PAIR_MS = 5 * 60_000L
 
 /** One treatment marker. [x] is minutes from minTimestamp, [y] is in the BG axis' units. */
-data class TreatmentMarker(val x: Double, val y: Double, val tier: MarkerTier)
+data class TreatmentMarker(val x: Double, val y: Double, val tier: MarkerTier, val amount: Double)
 
 /** The markers of one rebuild, split by kind because each kind has its own shape and color. */
 data class TreatmentMarkers(
@@ -159,7 +159,8 @@ fun treatmentMarkers(
         TreatmentMarker(
             x = x,
             y = (pairedY(bolus.timestamp, carbsTimes) + gap).coerceIn(minY, maxY),
-            tier = tierOf(bolus.amount, bolusAmounts)
+            tier = tierOf(bolus.amount, bolusAmounts),
+            amount = bolus.amount
         )
     }
     val carbsMarkers = validCarbs.mapNotNull { entry ->
@@ -168,7 +169,8 @@ fun treatmentMarkers(
         TreatmentMarker(
             x = x,
             y = (pairedY(entry.timestamp, bolusTimes) - gap).coerceIn(minY, maxY),
-            tier = tierOf(entry.amount, carbsAmounts)
+            tier = tierOf(entry.amount, carbsAmounts),
+            amount = entry.amount
         )
     }
 
