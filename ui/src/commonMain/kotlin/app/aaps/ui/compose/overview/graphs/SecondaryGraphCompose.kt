@@ -991,12 +991,6 @@ fun rememberIobLineStyles(): IobLineStyles {
     val extBolusColor = AapsTheme.elementColors.extendedBolus
     val decimalFormatter = LocalDecimalFormatter.current
 
-    val bolusLabelComponent = remember(smbColor) {
-        TextComponent(textStyle = TextStyle(color = smbColor, fontSize = TREATMENT_LABEL_FONT_SIZE))
-    }
-    val bolusValueFormatter = remember {
-        CartesianValueFormatter { _, value, _ -> formatBolusLabel(value, decimalFormatter) }
-    }
     val extBolusLabelComponent = remember(extBolusColor) {
         TextComponent(textStyle = TextStyle(color = extBolusColor, fontSize = TREATMENT_LABEL_FONT_SIZE))
     }
@@ -1004,7 +998,7 @@ fun rememberIobLineStyles(): IobLineStyles {
         CartesianValueFormatter { _, value, _ -> formatBolusLabel(value, decimalFormatter) }
     }
 
-    return remember(iobColor, smbColor, extBolusColor, bolusLabelComponent, bolusValueFormatter, extBolusLabelComponent, extBolusValueFormatter) {
+    return remember(iobColor, smbColor, extBolusColor, extBolusLabelComponent, extBolusValueFormatter) {
         IobLineStyles(
             iobLine = LineCartesianLayer.Line(
                 fill = LineCartesianLayer.LineFill.single(Fill(iobColor)),
@@ -1039,10 +1033,7 @@ fun rememberIobLineStyles(): IobLineStyles {
             bolusLine = LineCartesianLayer.Line(
                 fill = LineCartesianLayer.LineFill.single(Fill(Color.Transparent)),
                 areaFill = null,
-                pointProvider = TieredPointProvider(InvertedTriangleShape, smbColor, MAX_MANUAL_BOLUS_KEY),
-                dataLabel = bolusLabelComponent,
-                dataLabelPosition = Position.Vertical.Top,
-                dataLabelValueFormatter = bolusValueFormatter
+                pointProvider = TieredPointProvider(InvertedTriangleShape, smbColor, MAX_MANUAL_BOLUS_KEY)
             ),
             extBolusLine = LineCartesianLayer.Line(
                 fill = LineCartesianLayer.LineFill.single(Fill(extBolusColor)),
@@ -1069,16 +1060,7 @@ data class CobLineStyles(
 fun rememberCobLineStyles(): CobLineStyles {
     val cobColor = AapsTheme.generalColors.cobPrediction
     val carbsColor = AapsTheme.elementColors.carbs
-    val decimalFormatter = LocalDecimalFormatter.current
-
-    val carbsLabelComponent = remember(carbsColor) {
-        TextComponent(textStyle = TextStyle(color = carbsColor, fontSize = TREATMENT_LABEL_FONT_SIZE))
-    }
-    val carbsValueFormatter = remember {
-        CartesianValueFormatter { _, value, _ -> formatCarbsLabel(value, decimalFormatter) }
-    }
-
-    return remember(cobColor, carbsColor, carbsLabelComponent, carbsValueFormatter) {
+    return remember(cobColor, carbsColor) {
         CobLineStyles(
             cobLine = LineCartesianLayer.Line(
                 fill = LineCartesianLayer.LineFill.single(Fill(cobColor)),
@@ -1098,10 +1080,7 @@ fun rememberCobLineStyles(): CobLineStyles {
             carbsLine = LineCartesianLayer.Line(
                 fill = LineCartesianLayer.LineFill.single(Fill(Color.Transparent)),
                 areaFill = null,
-                pointProvider = TieredPointProvider(InvertedTriangleShape, carbsColor, MAX_CARBS_KEY),
-                dataLabel = carbsLabelComponent,
-                dataLabelPosition = Position.Vertical.Top,
-                dataLabelValueFormatter = carbsValueFormatter
+                pointProvider = TieredPointProvider(InvertedTriangleShape, carbsColor, MAX_CARBS_KEY)
             )
         )
     }
@@ -1116,12 +1095,6 @@ private fun formatBolusLabel(value: Double, decimalFormatter: DecimalFormatter):
     if (value == 0.0) return ""
     val formatted = decimalFormatter.to2Decimal(value).trimEnd('0').trimEnd('.').trimEnd(',')
     return if (formatted.startsWith("0.")) formatted.substring(1) else formatted
-}
-
-/** Formats carbs amount: 45.0->"45", 7.5->"7.5", 0.0->"" */
-private fun formatCarbsLabel(value: Double, decimalFormatter: DecimalFormatter): String {
-    if (value == 0.0) return ""
-    return decimalFormatter.to1Decimal(value).trimEnd('0').trimEnd('.').trimEnd(',')
 }
 
 // =========================================================================

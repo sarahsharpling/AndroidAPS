@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -62,6 +63,7 @@ import com.patrykandpatrick.vico.compose.common.component.TextComponent
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import com.patrykandpatrick.vico.compose.common.data.ExtraStore
 import kotlin.concurrent.Volatile
+import kotlin.math.round
 
 /** Series identifiers */
 /** Basal on BG graph — deprecated, now shown as flipped overlay on IOB graph. Set to true to restore. */
@@ -865,41 +867,68 @@ private fun createInvisibleTreatmentLine() = LineCartesianLayer.Line(
     areaFill = null
 )
 
+/** Rotate treatment amounts upwards from left to right, like the older AAPS BG graph. */
+private const val TREATMENT_LABEL_ANGLE = -45f
+private val TREATMENT_LABEL_GAP = 10.dp
+private val TREATMENT_LABEL_EDGE = 3.dp
+
 /**
- * Readable labels on the glucose chart. Coordinates use the same time/scroll transform as the
- * built-in now line, so labels follow the user's shared horizontal scrolling and zooming.
+ * One amount per treatment, above the BG curve for boluses and below it for carbs.
+ * The original time/scroll transform is unchanged, preserving synchronized dragging and zoom.
  */
 private class TreatmentAmountLabels(
     private val data: TreatmentLabelData,
     insulinColor: Color,
     carbsColor: Color
 ) : Decoration {
-    private val insulinText = TextComponent(textStyle = TextStyle(color = insulinColor, fontSize = 14.sp))
-    private val carbsText = TextComponent(textStyle = TextStyle(color = carbsColor, fontSize = 14.sp))
+    private val insulinText = TextComponent(
+        textStyle = TextStyle(color = insulinColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    )
+    private val carbsText = TextComponent(
+        textStyle = TextStyle(color = carbsColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    )
 
     override fun drawOverLayers(context: CartesianDrawingContext) {
         with(context) {
             if (ranges.xStep == 0.0) return
             val yRange = ranges.getYRange(Axis.Position.Vertical.Start)
             if (yRange.length <= 0.0) return
-            val pxGap = 6.dp.pixels
+
             fun drawLabel(marker: TreatmentMarker, insulin: Boolean) {
                 val x = layerBounds.left + layerDimensions.startPadding +
                     layerDimensions.xSpacing * ((marker.x - ranges.minX) / ranges.xStep).toFloat() - scroll
-                // Avoid clipped text at the left/right edges.
-                if (x < layerBounds.left + 20.dp.pixels || x > layerBounds.right - 20.dp.pixels) return
                 val y = layerBounds.bottom -
                     ((marker.y - yRange.minY) / yRange.length).toFloat() * layerBounds.height
-                val text = marker.amount.toString().removeSuffix(".0")
                 val component = if (insulin) insulinText else carbsText
+                // Round floating-point amounts to readable treatment precision; no dose is changed.
+                val rounded = if (insulin) round(marker.amount * 100.0) / 100.0
+                    else round(marker.amount * 10.0) / 10.0
+                val text = rounded.toString().removeSuffix(".0")
+                val bounds = component.getBounds(
+                    context = context,
+                    text = text,
+                    rotationDegrees = TREATMENT_LABEL_ANGLE,
+                    pad = false
+                )
+                val edge = TREATMENT_LABEL_EDGE.pixels
+                // Don't show half a number cut off by a graph edge during scrolling.
+                if (x - bounds.width / 2f < layerBounds.left + edge ||
+                    x + bounds.width / 2f > layerBounds.right - edge) return
+
+                val gap = TREATMENT_LABEL_GAP.pixels
+                val labelY = if (insulin) {
+                    (y - gap).coerceAtLeast(layerBounds.top + bounds.height + edge)
+                } else {
+                    (y + gap).coerceAtMost(layerBounds.bottom - bounds.height - edge)
+                }
                 component.draw(
                     context = context,
                     text = text,
                     x = x,
-                    y = if (insulin) (y - pxGap).coerceAtLeast(layerBounds.top + 16.dp.pixels)
-                        else (y + pxGap).coerceAtMost(layerBounds.bottom - 16.dp.pixels),
+                    y = labelY,
                     horizontalPosition = Position.Horizontal.Center,
-                    verticalPosition = if (insulin) Position.Vertical.Bottom else Position.Vertical.Top
+                    verticalPosition = if (insulin) Position.Vertical.Bottom else Position.Vertical.Top,
+                    rotationDegrees = TREATMENT_LABEL_ANGLE
                 )
             }
             data.markers.insulin.forEach { drawLabel(it, true) }
