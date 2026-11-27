@@ -869,7 +869,8 @@ private fun createInvisibleTreatmentLine() = LineCartesianLayer.Line(
 
 /** Rotate treatment amounts upwards from left to right, like the older AAPS BG graph. */
 private const val TREATMENT_LABEL_ANGLE = -45f
-private val TREATMENT_LABEL_GAP = 10.dp
+/** Clear space between the BG-linked treatment anchor and the nearest edge of its number. */
+private val TREATMENT_LABEL_CLEARANCE = 18.dp
 private val TREATMENT_LABEL_EDGE = 3.dp
 
 /**
@@ -915,19 +916,28 @@ private class TreatmentAmountLabels(
                 if (x - bounds.width / 2f < layerBounds.left + edge ||
                     x + bounds.width / 2f > layerBounds.right - edge) return
 
-                val gap = TREATMENT_LABEL_GAP.pixels
-                val labelY = if (insulin) {
-                    (y - gap).coerceAtLeast(layerBounds.top + bounds.height + edge)
+                // Draw around the label's *centre*, not its top/bottom anchor. With rotated
+                // text, edge alignment can make the glyphs straddle the glucose trace even
+                // when the nominal anchor is offset above or below it.
+                val halfHeight = bounds.height / 2f
+                val minCenterY = layerBounds.top + halfHeight + edge
+                val maxCenterY = layerBounds.bottom - halfHeight - edge
+                if (minCenterY > maxCenterY) return // Graph too short for this label.
+
+                val clearance = TREATMENT_LABEL_CLEARANCE.pixels
+                val desiredCenterY = if (insulin) {
+                    y - halfHeight - clearance
                 } else {
-                    (y + gap).coerceAtMost(layerBounds.bottom - bounds.height - edge)
+                    y + halfHeight + clearance
                 }
+                val labelCenterY = desiredCenterY.coerceIn(minCenterY, maxCenterY)
                 component.draw(
                     context = context,
                     text = text,
                     x = x,
-                    y = labelY,
+                    y = labelCenterY,
                     horizontalPosition = Position.Horizontal.Center,
-                    verticalPosition = if (insulin) Position.Vertical.Bottom else Position.Vertical.Top,
+                    verticalPosition = Position.Vertical.Center,
                     rotationDegrees = TREATMENT_LABEL_ANGLE
                 )
             }
